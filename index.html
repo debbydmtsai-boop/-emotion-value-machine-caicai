@@ -794,10 +794,42 @@ dialog::backdrop {
   text-align: center;
 }
 
+.admin-auth-error.is-success {
+  color: #23642c;
+}
+
 .admin-auth-actions {
   display: grid;
   grid-template-columns: 1fr 1.25fr;
   gap: 10px;
+}
+
+.admin-forgot {
+  justify-self: end;
+  margin: 7px 0 0;
+  padding: 5px 2px;
+  border: 0;
+  color: #8d3516;
+  background: transparent;
+  font: inherit;
+  font-size: .86rem;
+  font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.admin-forgot:hover,
+.admin-forgot:focus-visible {
+  color: #c34819;
+}
+
+.admin-auth-note {
+  margin: -9px 0 18px;
+  color: #704a2e;
+  font-size: .84rem;
+  line-height: 1.55;
+  text-align: center;
 }
 
 .healing-dialog {
@@ -1604,10 +1636,44 @@ dialog::backdrop {
           enterkeyhint="done"
           required
         />
+        <button id="admin-forgot-password" class="admin-forgot" type="button">忘記密碼？</button>
         <p id="admin-auth-error" class="admin-auth-error" role="alert" aria-live="polite"></p>
         <div class="admin-auth-actions">
           <button id="admin-auth-cancel" class="button-secondary" type="button">取消</button>
           <button id="admin-auth-submit" class="button-primary" type="submit">管理員登入</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="password-reset-dialog" class="admin-auth-dialog" aria-labelledby="password-reset-title">
+      <form id="password-reset-form" class="admin-auth-card">
+        <div class="admin-auth-icon" aria-hidden="true">🔑</div>
+        <p class="admin-auth-kicker">PASSWORD RESET</p>
+        <h2 id="password-reset-title">設定新密碼</h2>
+        <p class="admin-auth-lead">請輸入新的管理員密碼</p>
+        <p class="admin-auth-note">密碼至少 8 個字元，兩次輸入必須相同。</p>
+        <label class="admin-auth-label" for="password-reset-new">新密碼</label>
+        <input
+          id="password-reset-new"
+          class="admin-auth-input"
+          type="password"
+          autocomplete="new-password"
+          minlength="8"
+          required
+        />
+        <label class="admin-auth-label" for="password-reset-confirm">再次輸入新密碼</label>
+        <input
+          id="password-reset-confirm"
+          class="admin-auth-input"
+          type="password"
+          autocomplete="new-password"
+          minlength="8"
+          required
+        />
+        <p id="password-reset-error" class="admin-auth-error" role="alert" aria-live="polite"></p>
+        <div class="admin-auth-actions">
+          <button id="password-reset-cancel" class="button-secondary" type="button">取消</button>
+          <button id="password-reset-submit" class="button-primary" type="submit">更新密碼</button>
         </div>
       </form>
     </dialog>
@@ -1678,6 +1744,7 @@ const DEFAULT_TOPIC_ORDER = [
 const DEFAULT_FRONT_TOPICS = DEFAULT_TOPIC_ORDER.slice(0, 4);
 const SUPABASE_URL = "https://vwznruihparxoaeoofga.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_FeLhD5l9e0N7FsMQZ1ARZw_DiPbgPxV";
+const PASSWORD_RESET_REDIRECT_URL = "https://debbydmtsai-boop.github.io/-emotion-value-machine-caicai/";
 const DB_NAME = "emotion-value-machine-assets";
 const DB_STORE = "assets";
 const SCHEMA = "emotion-value-machine-admin-v1";
@@ -1728,6 +1795,14 @@ const dom = {
   adminAuthError: document.querySelector("#admin-auth-error"),
   adminAuthCancel: document.querySelector("#admin-auth-cancel"),
   adminAuthSubmit: document.querySelector("#admin-auth-submit"),
+  adminForgotPassword: document.querySelector("#admin-forgot-password"),
+  passwordResetDialog: document.querySelector("#password-reset-dialog"),
+  passwordResetForm: document.querySelector("#password-reset-form"),
+  passwordResetNew: document.querySelector("#password-reset-new"),
+  passwordResetConfirm: document.querySelector("#password-reset-confirm"),
+  passwordResetError: document.querySelector("#password-reset-error"),
+  passwordResetCancel: document.querySelector("#password-reset-cancel"),
+  passwordResetSubmit: document.querySelector("#password-reset-submit"),
   adminDialog: document.querySelector("#admin-dialog"),
   adminClose: document.querySelector("#admin-close"),
   adminLogout: document.querySelector("#admin-logout"),
@@ -1754,6 +1829,8 @@ let toastTimer;
 let webMcpLifecycle;
 let adminUnlocked = false;
 let adminSession = null;
+let recoverySession = null;
+let recoveryEmail = "";
 let usingFallbackData = false;
 
 const run = {
@@ -2325,7 +2402,155 @@ function setAdminTab(tabName) {
 function closeAdminAuth() {
   dom.adminPassword.value = "";
   dom.adminAuthError.textContent = "";
+  dom.adminAuthError.classList.remove("is-success");
   if (dom.adminAuthDialog.open) dom.adminAuthDialog.close();
+}
+
+function closePasswordReset() {
+  dom.passwordResetNew.value = "";
+  dom.passwordResetConfirm.value = "";
+  dom.passwordResetError.textContent = "";
+  dom.passwordResetError.classList.remove("is-success");
+  if (dom.passwordResetDialog.open) dom.passwordResetDialog.close();
+}
+
+async function requestPasswordResetEmail() {
+  const email = dom.adminEmail.value.trim();
+  dom.adminAuthError.classList.remove("is-success");
+  if (!email || !dom.adminEmail.checkValidity()) {
+    dom.adminAuthError.textContent = "請先輸入正確的管理員 Email。";
+    dom.adminEmail.focus();
+    return;
+  }
+
+  recoveryEmail = email;
+  dom.adminEmail.disabled = true;
+  dom.adminForgotPassword.disabled = true;
+  dom.adminAuthSubmit.disabled = true;
+  dom.adminAuthError.textContent = "正在寄送重設密碼信……";
+  try {
+    await supabaseRequest(`/auth/v1/recover?redirect_to=${encodeURIComponent(PASSWORD_RESET_REDIRECT_URL)}`, {
+      method: "POST",
+      body: { email },
+    });
+    dom.adminAuthError.classList.add("is-success");
+    dom.adminAuthError.textContent = "如果這個 Email 是管理員帳號，重設密碼信已寄出，請查看收件匣與垃圾郵件。";
+  } catch (error) {
+    console.error("Unable to send password recovery email", error);
+    dom.adminAuthError.textContent = `寄送失敗：${error.message || "請稍後再試"}`;
+  } finally {
+    dom.adminEmail.disabled = false;
+    dom.adminForgotPassword.disabled = false;
+    dom.adminAuthSubmit.disabled = false;
+  }
+}
+
+function cleanRecoveryUrl() {
+  const url = new URL(window.location.href);
+  ["access_token", "refresh_token", "expires_in", "expires_at", "token_type", "type", "token_hash", "error", "error_code", "error_description"].forEach((key) => {
+    url.searchParams.delete(key);
+  });
+  url.hash = "";
+  window.history.replaceState(null, "", `${url.pathname}${url.search}`);
+}
+
+async function handlePasswordRecoveryCallback() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const queryParams = new URLSearchParams(window.location.search);
+  const type = hashParams.get("type") || queryParams.get("type");
+  const callbackError = hashParams.get("error_description") || queryParams.get("error_description");
+
+  if (callbackError) {
+    cleanRecoveryUrl();
+    dom.adminAuthError.textContent = `重設連結無法使用：${callbackError}`;
+    dom.adminAuthDialog.showModal();
+    return;
+  }
+
+  let session = null;
+  const accessToken = hashParams.get("access_token") || queryParams.get("access_token");
+  if (type === "recovery" && accessToken) {
+    session = {
+      access_token: accessToken,
+      refresh_token: hashParams.get("refresh_token") || queryParams.get("refresh_token") || "",
+    };
+  } else if (type === "recovery" && queryParams.get("token_hash")) {
+    try {
+      session = await supabaseRequest("/auth/v1/verify", {
+        method: "POST",
+        body: { type: "recovery", token_hash: queryParams.get("token_hash") },
+      });
+    } catch (error) {
+      cleanRecoveryUrl();
+      dom.adminAuthError.textContent = `重設連結驗證失敗：${error.message || "連結可能已過期"}`;
+      dom.adminAuthDialog.showModal();
+      return;
+    }
+  }
+
+  if (!session?.access_token) return;
+  recoverySession = session;
+  cleanRecoveryUrl();
+  if (dom.adminAuthDialog.open) dom.adminAuthDialog.close();
+  dom.passwordResetError.textContent = "";
+  dom.passwordResetDialog.showModal();
+  window.setTimeout(() => dom.passwordResetNew.focus(), 0);
+}
+
+async function updateRecoveredPassword(event) {
+  event.preventDefault();
+  const password = dom.passwordResetNew.value;
+  const confirmation = dom.passwordResetConfirm.value;
+  dom.passwordResetError.classList.remove("is-success");
+
+  if (!recoverySession?.access_token) {
+    dom.passwordResetError.textContent = "重設連結已失效，請重新申請重設密碼信。";
+    return;
+  }
+  if (password.length < 8) {
+    dom.passwordResetError.textContent = "新密碼至少需要 8 個字元。";
+    return;
+  }
+  if (password !== confirmation) {
+    dom.passwordResetError.textContent = "兩次輸入的密碼不相同。";
+    return;
+  }
+
+  dom.passwordResetNew.disabled = true;
+  dom.passwordResetConfirm.disabled = true;
+  dom.passwordResetSubmit.disabled = true;
+  dom.passwordResetError.textContent = "正在更新密碼……";
+  try {
+    const user = await supabaseRequest("/auth/v1/user", {
+      method: "PUT",
+      accessToken: recoverySession.access_token,
+      body: { password },
+    });
+    const loginEmail = user?.email || recoveryEmail;
+    try {
+      await supabaseRequest("/auth/v1/logout", {
+        method: "POST",
+        accessToken: recoverySession.access_token,
+      });
+    } catch (logoutError) {
+      console.warn("Recovery session could not be explicitly signed out", logoutError);
+    }
+    recoverySession = null;
+    closePasswordReset();
+    dom.adminEmail.value = loginEmail;
+    dom.adminPassword.value = "";
+    dom.adminAuthError.classList.add("is-success");
+    dom.adminAuthError.textContent = "密碼已更新，請使用新密碼登入。";
+    dom.adminAuthDialog.showModal();
+    window.setTimeout(() => dom.adminPassword.focus(), 0);
+  } catch (error) {
+    console.error("Unable to update recovered password", error);
+    dom.passwordResetError.textContent = `更新失敗：${error.message || "請重新申請重設密碼信"}`;
+  } finally {
+    dom.passwordResetNew.disabled = false;
+    dom.passwordResetConfirm.disabled = false;
+    dom.passwordResetSubmit.disabled = false;
+  }
 }
 
 function requestAdminAccess() {
@@ -3068,15 +3293,30 @@ function bindEvents() {
   dom.adminOpen.addEventListener("click", requestAdminAccess);
   dom.adminAuthForm.addEventListener("submit", verifyAdminCredentials);
   dom.adminAuthCancel.addEventListener("click", closeAdminAuth);
+  dom.adminForgotPassword.addEventListener("click", requestPasswordResetEmail);
   dom.adminEmail.addEventListener("input", () => {
     dom.adminAuthError.textContent = "";
+    dom.adminAuthError.classList.remove("is-success");
   });
   dom.adminPassword.addEventListener("input", () => {
     dom.adminAuthError.textContent = "";
+    dom.adminAuthError.classList.remove("is-success");
   });
   dom.adminAuthDialog.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeAdminAuth();
+  });
+  dom.passwordResetForm.addEventListener("submit", updateRecoveredPassword);
+  dom.passwordResetCancel.addEventListener("click", closePasswordReset);
+  dom.passwordResetNew.addEventListener("input", () => {
+    dom.passwordResetError.textContent = "";
+  });
+  dom.passwordResetConfirm.addEventListener("input", () => {
+    dom.passwordResetError.textContent = "";
+  });
+  dom.passwordResetDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closePasswordReset();
   });
   dom.adminClose.addEventListener("click", requestAdminClose);
   dom.adminLogout.addEventListener("click", logoutAdmin);
@@ -3111,6 +3351,7 @@ async function init() {
     }
     await loadAssetUrls();
     bindEvents();
+    await handlePasswordRecoveryCallback();
     applyAssets();
     ensureSelectedTopic();
     resetRun(run.topicId, false);
