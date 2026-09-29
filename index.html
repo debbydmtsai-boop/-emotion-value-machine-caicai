@@ -1973,7 +1973,7 @@ function normalizeState(raw) {
 function supabaseHeaders(accessToken = null, extra = {}) {
   return {
     apikey: SUPABASE_PUBLISHABLE_KEY,
-    Authorization: `Bearer ${accessToken || SUPABASE_PUBLISHABLE_KEY}`,
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...extra,
   };
 }
